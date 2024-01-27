@@ -22,8 +22,11 @@
     "@babel/preset-typescript": "^7.23.3",
     "@mdx-js/mdx": "^3.0.0",
     "glob": "^10.3.10",
+    "html-to-react": "^1.7.0",
+    "htmlparser2": "^9.1.0",
     "preact": "^10.19.3",
     "preact-render-to-string": "^6.3.1",
+    "remark-frontmatter": "^5.0.0",
     "yaml": "^2.3.4"
   }
 }

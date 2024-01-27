@@ -2,7 +2,7 @@ import { promises as fs, existsSync as exists } from "node:fs"
 import path from "node:path"
 
 import { LambConfig } from "./config.ts"
-import { LambPage, makePage } from "./page.ts"
+import { LambPage, makePage, makePageNew } from "./page.ts"
 
 /**
  * A scope is essentially a directory. It can have a layout, and a
@@ -73,17 +73,19 @@ export async function renderScope(
       currentParent = currentParent.parent
     }
 
+    /*
     await fs.writeFile(
       path.join(outdir, `${page.slug}.html`),
       finalContents,
       "utf-8"
     )
+    */
   }
 
   // Render all children.
   for (const [subscopeName, subscope] of Object.entries(scope.children)) {
     const subscopeOutdir = path.join(outdir, subscopeName)
-    await fs.mkdir(subscopeOutdir)
+    /*await fs.mkdir(subscopeOutdir)*/
     await renderScope(config, subscope, subscopeOutdir)
   }
 }
@@ -136,7 +138,7 @@ export async function makeScope(
         )
       } else {
         // Make page.
-        pages.push(await makePage(config, fullpath))
+        pages.push(await makePageNew(config, fullpath))
       }
     }
   }
