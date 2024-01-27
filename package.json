@@ -1,5 +1,5 @@
 {
-  "name": "lamb",
+  "name": "@mblouka/lamb",
   "version": "0.1.0",
   "description": "Straightforward, extensible, zero configuration public domain static site generator",
   "homepage": "https://github.com/mblouka/lamb",
@@ -12,6 +12,11 @@
   "bin": {
     "lamb": "./dist/index.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mblouka/lamb.git"
+  },
+  "bugs": "https://github.com/mblouka/lamb/issues",
   "keywords": ["ssg", "static", "generator", "public-domain", "mdx", "md", "jsx", "lamb"],
   "author": "https://github.com/mblouka",
   "license": "UNLICENSED",
