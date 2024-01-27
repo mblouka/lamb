@@ -12,6 +12,8 @@ import yaml from "yaml"
 
 import { LambConfig } from "./config"
 import transform from "./transform"
+import { LambState } from "./state"
+import { LambScope, getScope } from "./scope"
 
 type LambPageRenderer = (params: any, htmlBody?: string) => Promise<string>
 
@@ -98,7 +100,7 @@ const { compiletime, runtime } = resolveEvaluateOptions(jsxRuntime)
 //===========================================================================
 
 async function renderHtmlPage(
-  config: LambConfig,
+  state: LambState,
   page: LambPage,
   params: any,
   htmlBody?: string
@@ -110,7 +112,7 @@ async function renderHtmlPage(
 }
 
 async function renderMarkdownPage(
-  config: LambConfig,
+  state: LambState,
   page: LambPage,
   params: any,
   htmlBody?: string
@@ -124,7 +126,7 @@ async function renderMarkdownPage(
 }
 
 async function renderJavascriptPage(
-  config: LambConfig,
+  state: LambState,
   page: LambPage,
   params: any,
   htmlBody?: string
@@ -136,17 +138,17 @@ async function renderJavascriptPage(
 }
 
 export async function renderPage(
-  config: LambConfig,
+  state: LambState,
   page: LambPage,
   params: any,
   htmlBody?: string
 ) {
   if (page.type === "html") {
-    return renderHtmlPage(config, page, params, htmlBody)
+    return renderHtmlPage(state, page, params, htmlBody)
   } else if (page.type === "md") {
-    return renderMarkdownPage(config, page, params, htmlBody)
+    return renderMarkdownPage(state, page, params, htmlBody)
   } else if (page.type === "js") {
-    return renderJavascriptPage(config, page, params, htmlBody)
+    return renderJavascriptPage(state, page, params, htmlBody)
   } else {
     throw new Error(`Invalid type "${page.type}"`)
   }
@@ -157,7 +159,7 @@ export async function renderPage(
 //===========================================================================
 
 const Loaders = {
-  Markdown: (config: LambConfig, filepath: string) => {
+  Markdown: (state: LambState, filepath: string) => {
     // TODO: Instead of reading from the file, see if we already parsed the file
     // and if so, extract the frontmatter from the existing parse. If parse doesn't
     // exist yet, do it right now.
@@ -183,7 +185,7 @@ const LoaderMap = {
   ".mdx": Loaders.Markdown,
 }
 
-export async function makeHtmlPage(config: LambConfig, pathToPage: string) {
+async function createHtmlPage(state: LambState, pathToPage: string) {
   const parsedPath = path.parse(pathToPage)
   const htmlContents = await fs.readFile(pathToPage, "utf-8")
 
@@ -216,7 +218,7 @@ export async function makeHtmlPage(config: LambConfig, pathToPage: string) {
   } as LambPage
 }
 
-export async function makeMarkdownPage(config: LambConfig, pathToPage: string) {
+async function createMarkdownPage(state: LambState, pathToPage: string) {
   const parsedPath = path.parse(pathToPage)
   const markdownContents = await fs.readFile(pathToPage, "utf-8")
 
@@ -231,7 +233,7 @@ export async function makeMarkdownPage(config: LambConfig, pathToPage: string) {
   // Process the code, retrieving the frontmatter in the process.
   const frontmatter: Record<string, any> = {}
   const transformedJs = await transform(
-    config,
+    state,
     {
       ExtractFrontmatter: frontmatter,
       // TODO: Special imports.
@@ -253,22 +255,19 @@ export async function makeMarkdownPage(config: LambConfig, pathToPage: string) {
   } as LambPage
 }
 
-export async function makeJavascriptPage(
-  config: LambConfig,
-  pathToPage: string
-) {
+async function createJavascriptPage(state: LambState, pathToPage: string) {
   const parsedPath = path.parse(pathToPage)
   const jsContents = await fs.readFile(pathToPage, "utf-8")
 
   // Process the code, retrieving the frontmatter in the process.
   const frontmatter: Record<string, any> = {}
   const transformedJs = await transform(
-    config,
+    state,
     {
       ExtractFrontmatter: frontmatter,
       SpecialImports: {
         loaders: LoaderMap,
-        config,
+        state,
       },
       ConvertToDynamicImports: {},
     },
@@ -289,14 +288,22 @@ export async function makeJavascriptPage(
   } as LambPage
 }
 
-export async function makePage(config: LambConfig, pathToPage: string) {
-  const pathinfo = path.parse(pathToPage)
+export async function createPage(
+  state: LambState,
+  pathToPage: string,
+  useThisScope?: LambScope
+) {
+  const parsed = path.parse(pathToPage)
+  let scope = useThisScope
+  if (scope === undefined) {
+    scope = await getScope(state, parsed.dir)
+  }
 
   // Extension processors.
   const knownProcessors: Record<LambPageType, Function> = {
-    html: makeHtmlPage,
-    md: makeMarkdownPage,
-    js: makeJavascriptPage,
+    html: createHtmlPage,
+    md: createMarkdownPage,
+    js: createJavascriptPage,
   }
 
   // Map of extension types.
@@ -311,10 +318,26 @@ export async function makePage(config: LambConfig, pathToPage: string) {
     ".tsx": "js",
   }
 
-  const recognized = knownExtensions[pathinfo.ext]
+  const recognized = knownExtensions[parsed.ext]
   if (recognized !== undefined) {
-    return await knownProcessors[recognized](config, pathToPage)
+    return (state.filecache[pathToPage] = await knownProcessors[recognized](
+      state.config,
+      pathToPage
+    ))
   } else {
-    throw new Error(`Unrecognized extension "${pathinfo.ext}"`)
+    throw new Error(`Unrecognized extension "${parsed.ext}"`)
   }
+}
+
+export async function getPage(state: LambState, pathToPage: string) {
+  const parsed = path.parse(pathToPage)
+  let existingPage = state.filecache[pathToPage]
+  if (existingPage === undefined) {
+    existingPage = await createPage(
+      state,
+      pathToPage,
+      await getScope(state, parsed.dir)
+    )
+  }
+  return existingPage
 }

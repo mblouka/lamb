@@ -7,6 +7,7 @@ async function build() {
     platform: "node",
     packages: "external",
     format: "esm",
+    minify: !process.argv.includes("--dev"),
     bundle: true,
   })
 }

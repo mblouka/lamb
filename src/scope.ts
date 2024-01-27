@@ -1,8 +1,9 @@
-import { promises as fs, existsSync as exists } from "node:fs"
+import { promises as fs, existsSync as exists, existsSync } from "node:fs"
 import path from "node:path"
 
 import { LambConfig } from "./config.ts"
-import { LambPage, makePage, renderPage } from "./page.ts"
+import { LambPage, createPage, renderPage } from "./page.ts"
+import { LambState } from "./state.ts"
 
 /**
  * A scope is essentially a directory. It can have a layout, and a
@@ -50,17 +51,17 @@ export interface LambScope {
  * Recursive function for rendering a scope.
  */
 export async function renderScope(
-  config: LambConfig,
+  state: LambState,
   scope: LambScope,
   outdir: string
 ) {
   // Render the pages first.
   for (const page of scope.pages) {
-    const bodyContents = await renderPage(config, page, {})
+    const bodyContents = await renderPage(state, page, {})
 
     const wrappedContents =
       scope.layout !== undefined
-        ? await renderPage(config, scope.layout, {}, bodyContents) //scope.layout.renderer({ page, config }, bodyContents)
+        ? await renderPage(state, scope.layout, {}, bodyContents) //scope.layout.renderer({ page, config }, bodyContents)
         : bodyContents
 
     let finalContents = wrappedContents
@@ -68,7 +69,7 @@ export async function renderScope(
     while (currentParent) {
       finalContents =
         currentParent.layout !== undefined
-          ? await renderPage(config, currentParent.layout, {}, finalContents) //currentParent.layout.renderer({ page, config }, finalContents)
+          ? await renderPage(state, currentParent.layout, {}, finalContents) //currentParent.layout.renderer({ page, config }, finalContents)
           : finalContents
       currentParent = currentParent.parent
     }
@@ -83,29 +84,44 @@ export async function renderScope(
   // Render all children.
   for (const [subscopeName, subscope] of Object.entries(scope.children)) {
     const subscopeOutdir = path.join(outdir, subscopeName)
-    await fs.mkdir(subscopeOutdir)
-    await renderScope(config, subscope, subscopeOutdir)
+    if (!existsSync(subscopeOutdir)) {
+      await fs.mkdir(subscopeOutdir)
+    }
+    await renderScope(state, subscope, subscopeOutdir)
   }
 }
 
-export async function makeScope(
-  config: LambConfig,
-  pathToScope: string,
-  root?: LambScope,
-  parent?: LambScope,
-  doNotParseChildren?: boolean
+interface LambScopeCreationOptions {
+  path: string
+  root?: LambScope
+  parent?: LambScope
+}
+
+/**
+ * Create (and cache) a scope. Note that this doesn't process
+ * any children save for the associated `_layout`. To process
+ * a scope's children, use `createScopeChildren`.
+ */
+export async function createScope(
+  state: LambState,
+  opts: LambScopeCreationOptions
 ) {
-  const parsed = path.parse(pathToScope)
+  const parsed = path.parse(opts.path)
 
-  const scope = { parent, path: pathToScope } as LambScope
-  scope.root = root ?? scope
+  const partialScope = {
+    name: parsed.name,
+    path: opts.path,
+    parent: opts.parent,
+    children: {},
+    pages: [],
+  } satisfies Partial<LambScope> as Record<string, any>
+  state.scopecache[opts.path] = partialScope as LambScope
 
-  let name = parsed.name
-  let layout: LambPage | undefined = undefined
-  const children: Record<string, LambScope> = {}
-  const pages: LambPage[] = []
+  // If root isn't passed, we assume we are root.
+  partialScope.root = opts.root ?? partialScope
 
-  // Check if layout exists.
+  // Check if layout exists. Markdown layouts are not supported
+  // because we assume the layout contains boilerplate html.
   const layoutNames = [
     "_layout.html",
     "_layout.js",
@@ -114,36 +130,61 @@ export async function makeScope(
     "_layout.tsx",
   ]
   for (const layoutName of layoutNames) {
-    const layoutPath = path.join(pathToScope, layoutName)
+    const layoutPath = path.join(opts.path, layoutName)
     if (exists(layoutPath)) {
-      layout = await makePage(config, layoutPath)
+      // TODO: Switch to createPage.
+      partialScope.layout = await createPage(state, layoutPath)
     }
   }
-  scope.layout = layout
 
+  // Error if we are root AND there is no layout.
+  if (partialScope.root === partialScope && partialScope.layout === undefined) {
+    throw new Error(
+      `Root layout is missing. Please create a "_layout.{html,js,jsx,ts,tsx}" file in your project root.`
+    )
+  }
+
+  // Cache and return the scope.
+  return partialScope as LambScope
+}
+
+export async function createScopeChildren(
+  state: LambState,
+  scope: LambScope,
+  recursive?: boolean
+) {
   // Start hammering away at contents.
-  for (const subpath of await fs.readdir(pathToScope)) {
+  for (const subpath of await fs.readdir(scope.path)) {
     if (!subpath.startsWith("_")) {
-      const fullpath = path.join(pathToScope, subpath)
+      const fullpath = path.join(scope.path, subpath)
       const subparsed = path.parse(fullpath)
       const stats = await fs.lstat(fullpath)
       if (stats.isDirectory()) {
-        // Make scope.
-        children[subparsed.name] = await makeScope(
-          config,
-          fullpath,
-          root,
-          scope
-        )
+        scope.children[subparsed.name] = await createScope(state, {
+          path: fullpath,
+          root: scope.root,
+          parent: scope,
+        })
+        if (recursive) {
+          createScopeChildren(state, scope.children[subparsed.name], recursive)
+        }
       } else {
-        // Make page.
-        pages.push(await makePage(config, fullpath))
+        scope.pages.push(await createPage(state, fullpath, scope))
       }
     }
   }
-  scope.children = children
-  scope.pages = pages
+}
 
-  scope.name = name
-  return scope
+export async function getScope(state: LambState, pathToScope: string) {
+  const parsed = path.parse(pathToScope)
+  let existingScope = state.scopecache[pathToScope]
+  if (existingScope === undefined) {
+    const parentScope = await getScope(state, parsed.dir)
+    existingScope = await createScope(state, {
+      path: pathToScope,
+      parent: parentScope,
+      root: parentScope.root,
+    })
+  }
+  return existingScope
 }

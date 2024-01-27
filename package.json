@@ -1,15 +1,20 @@
 {
   "name": "lamb",
-  "version": "1.0.0",
-  "description": "",
+  "version": "0.1.0",
+  "description": "Straightforward, extensible, zero configuration public domain static site generator",
+  "homepage": "https://github.com/mblouka/lamb",
   "type": "module",
   "scripts": {
     "start": "node ./dist/index.js",
-    "build": "node ./build.mjs"
+    "build": "node ./build.mjs",
+    "build:dev": "node ./build.mjs --dev"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "bin": {
+    "lamb": "./dist/index.js"
+  },
+  "keywords": ["ssg", "static", "generator", "public-domain", "mdx", "md", "jsx", "lamb"],
+  "author": "https://github.com/mblouka",
+  "license": "UNLICENSED",
   "devDependencies": {
     "@types/babel__core": "^7.20.5",
     "@types/node": "^20.11.7",

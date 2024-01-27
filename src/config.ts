@@ -1,25 +1,29 @@
-import { LambPage } from "./page"
-import { LambScope } from "./scope"
+import { promises as fs } from "node:fs"
+import path from "node:path"
 
 /**
- * Runtime data inserted into the config.
+ * An optional configuration file that can be inserted at
+ * `/lamb.config.json`. If it doesn't exist, a default configuration
+ * will be used instead.
  */
-interface LambConfigRuntime {
-  /**
-   * Map of all currently processed lamb pages.
-   */
-  filecache: Record<string, LambPage>
-
-  /**
-   * Map of all currently processed lamb scopes.
-   */
-  scopecache: Record<string, LambScope>
-}
-
 export interface LambConfig {
   /**
-   * Runtime data. Errors at load time if "runtime" is
-   * defined in the configuration file.
+   * Name of project.
    */
-  runtime: LambConfigRuntime
+  name?: string
+
+  /**
+   * Output directory of project. Defaults to `/out`.
+   */
+  outdir?: string
+}
+
+export async function createConfiguration(pathToConfig: string) {
+  let config: LambConfig
+  try {
+    config = JSON.parse(await fs.readFile(pathToConfig, "utf-8"))
+  } catch {
+    throw new Error(`Invalid or missing configuration at "${pathToConfig}"`)
+  }
+  return config
 }

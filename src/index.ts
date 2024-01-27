@@ -1,14 +1,55 @@
-import fs from "node:fs"
-import { makeScope, renderScope, LambScope } from "./scope"
+#!/usr/bin/env node
 
-// test
+import { promises as fs, existsSync } from "node:fs"
+import path from "node:path"
 
-const testscope = await makeScope(
-  {},
-  "./testscope",
-  undefined as unknown as LambScope
-)
+import { LambConfig, createConfiguration } from "./config"
+import { createScope, createScopeChildren, renderScope } from "./scope"
+import { LambState } from "./state"
 
-fs.rmSync("./out", { recursive: true, force: true })
-fs.mkdirSync("./out")
-await renderScope({}, testscope, "./out")
+async function main() {
+  const args = process.argv
+  args.shift() // Remove binary.
+  args.shift() // Remove file.
+
+  if (args[0] === "dev") {
+    // TODO: Dev server.
+  } else {
+    // Did we pass a specific working directory?
+    const cwd =
+      args[0] !== undefined ? await fs.realpath(args[0]) : process.cwd()
+
+    let configuration = {
+      outdir: path.join(cwd, "out"),
+    } as LambConfig
+
+    // See if we have a configuration file.
+    const confLocation = path.join(cwd, "lamb.config.json")
+    if (existsSync(confLocation)) {
+      configuration = await createConfiguration(confLocation)
+    }
+
+    // Create initial state.
+    const initialState = {
+      config: configuration,
+      filecache: {},
+      scopecache: {},
+    } as LambState
+
+    // Create the root scope.
+    const rootScope = await createScope(initialState, { path: cwd })
+
+    // Recursively create root scope children.
+    await createScopeChildren(initialState, rootScope, true)
+
+    // Render the root scope into outdir. Create outdir if it doesn't exist.
+    if (!existsSync(configuration.outdir!)) {
+      await fs.mkdir(configuration.outdir!)
+    }
+    await renderScope(initialState, rootScope, configuration.outdir!)
+
+    // We're done!
+  }
+}
+
+main().catch(console.error)

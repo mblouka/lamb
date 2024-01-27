@@ -6,6 +6,7 @@ import { glob } from "glob"
 import yaml from "yaml"
 
 import { LambConfig } from "./config"
+import { LambState } from "./state"
 
 //===========================================================================
 // Utility functions.
@@ -178,13 +179,13 @@ const InhousePlugins = {
      */
     loaders: Record<
       string,
-      (config: LambConfig, filepath: string) => string | object
+      (state: LambState, filepath: string) => string | object
     >
 
     /**
      * Config object, used to read cache.
      */
-    config: LambConfig
+    state: LambState
   }) {
     return {
       visitor: {
@@ -194,7 +195,7 @@ const InhousePlugins = {
         ) {
           const options = state.opts as typeof opts
           const importPath = npath.node.source.value
-          const config = options.config
+          const lambstate = options.state
           const loader = options.loaders[path.parse(importPath).ext]
 
           if (loader !== undefined) {
@@ -205,10 +206,10 @@ const InhousePlugins = {
               const files = glob
                 .sync(importPath, { cwd: directoryPath })
                 .map((subpath) => path.join(directoryPath, subpath))
-              value = files.map((file) => loader(config, file))
+              value = files.map((file) => loader(lambstate, file))
             } else {
               // Non-glob, import a single file.
-              value = loader(config, importPath)
+              value = loader(lambstate, importPath)
             }
 
             npath.replaceWith(
@@ -227,7 +228,7 @@ const InhousePlugins = {
 }
 
 export default async function transform(
-  config: LambConfig,
+  state: LambState,
   opts: Partial<InhousePluginsOptionsMap>,
   code: string,
   pathToFile: string
