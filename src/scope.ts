@@ -2,7 +2,7 @@ import { promises as fs, existsSync as exists } from "node:fs"
 import path from "node:path"
 
 import { LambConfig } from "./config.ts"
-import { LambPage, makePage, makePageNew } from "./page.ts"
+import { LambPage, makePage, renderPage } from "./page.ts"
 
 /**
  * A scope is essentially a directory. It can have a layout, and a
@@ -56,11 +56,11 @@ export async function renderScope(
 ) {
   // Render the pages first.
   for (const page of scope.pages) {
-    const bodyContents = await page.renderer({ page, config })
+    const bodyContents = await renderPage(config, page, {})
 
     const wrappedContents =
       scope.layout !== undefined
-        ? await scope.layout.renderer({ page, config }, bodyContents)
+        ? await renderPage(config, scope.layout, {}, bodyContents) //scope.layout.renderer({ page, config }, bodyContents)
         : bodyContents
 
     let finalContents = wrappedContents
@@ -68,24 +68,22 @@ export async function renderScope(
     while (currentParent) {
       finalContents =
         currentParent.layout !== undefined
-          ? await currentParent.layout.renderer({ page, config }, finalContents)
+          ? await renderPage(config, currentParent.layout, {}, finalContents) //currentParent.layout.renderer({ page, config }, finalContents)
           : finalContents
       currentParent = currentParent.parent
     }
 
-    /*
     await fs.writeFile(
       path.join(outdir, `${page.slug}.html`),
       finalContents,
       "utf-8"
     )
-    */
   }
 
   // Render all children.
   for (const [subscopeName, subscope] of Object.entries(scope.children)) {
     const subscopeOutdir = path.join(outdir, subscopeName)
-    /*await fs.mkdir(subscopeOutdir)*/
+    await fs.mkdir(subscopeOutdir)
     await renderScope(config, subscope, subscopeOutdir)
   }
 }
@@ -138,7 +136,7 @@ export async function makeScope(
         )
       } else {
         // Make page.
-        pages.push(await makePageNew(config, fullpath))
+        pages.push(await makePage(config, fullpath))
       }
     }
   }

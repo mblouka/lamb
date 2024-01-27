@@ -3,6 +3,6 @@ import currentpages from "./*.md";
 
 export default function PageComponent() {
     return currentpages.map(page => <ul>
-        <li>{page.filename} - {page.title ?? "no title"}</li>
+        <li>{page.file} - {page.title ?? "no title"}</li>
     </ul>)
 }

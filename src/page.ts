@@ -1,15 +1,17 @@
-import { promises as fs } from "node:fs"
+import { promises as fs, readFileSync } from "node:fs"
 import path from "node:path"
 
 import { compile } from "@mdx-js/mdx"
 import remarkFrontmatter from "remark-frontmatter"
+import remarkMdxFrontmatter from "remark-mdx-frontmatter"
 import { renderToString } from "preact-render-to-string"
 import * as jsxRuntime from "preact/jsx-runtime"
 import { Parser as HTRParser } from "html-to-react"
 import { Parser as HTMLParser } from "htmlparser2"
+import yaml from "yaml"
 
 import { LambConfig } from "./config"
-import { transformJsCode } from "./transform"
+import transform from "./transform"
 
 type LambPageRenderer = (params: any, htmlBody?: string) => Promise<string>
 
@@ -154,6 +156,33 @@ export async function renderPage(
 // Page template processors.
 //===========================================================================
 
+const Loaders = {
+  Markdown: (config: LambConfig, filepath: string) => {
+    // TODO: Instead of reading from the file, see if we already parsed the file
+    // and if so, extract the frontmatter from the existing parse. If parse doesn't
+    // exist yet, do it right now.
+    const content = readFileSync(filepath, "utf-8")
+    const parts = content.toString().split(/---\r?\n/g)
+
+    let obj: Record<string, any> = {}
+    if (parts.length >= 3) {
+      obj = yaml.parse(parts[1])
+    }
+
+    // Insert metadata.
+    Object.assign(obj, {
+      file: filepath,
+    })
+
+    return obj
+  },
+}
+
+const LoaderMap = {
+  ".md": Loaders.Markdown,
+  ".mdx": Loaders.Markdown,
+}
+
 export async function makeHtmlPage(config: LambConfig, pathToPage: string) {
   const parsedPath = path.parse(pathToPage)
   const htmlContents = await fs.readFile(pathToPage, "utf-8")
@@ -191,27 +220,76 @@ export async function makeMarkdownPage(config: LambConfig, pathToPage: string) {
   const parsedPath = path.parse(pathToPage)
   const markdownContents = await fs.readFile(pathToPage, "utf-8")
 
-  // TODO: Obtain frontmatter from this (and fill in config).
-  // TODO: Babeling for import shit.
-
   // Compile the contents, locate frontmatter in "yaml" child node.
-  const mdxGenerator = await compile(markdownContents, {
-    ...compiletime,
-    remarkPlugins: [remarkFrontmatter],
-  })
+  const mdxGenerator = (
+    await compile(markdownContents, {
+      ...compiletime,
+      remarkPlugins: [remarkFrontmatter, remarkMdxFrontmatter],
+    })
+  ).toString()
 
-  let frontmatter: Record<string, any> = {}
-  console.log(mdxGenerator.value)
+  // Process the code, retrieving the frontmatter in the process.
+  const frontmatter: Record<string, any> = {}
+  const transformedJs = await transform(
+    config,
+    {
+      ExtractFrontmatter: frontmatter,
+      // TODO: Special imports.
+    },
+    mdxGenerator,
+    pathToPage
+  )
 
-  //const compiledMdx = new AsyncFunction(String(mdxGenerator))
+  // Create the async function component generator.
+  const contents = new AsyncFunction(String(transformedJs))
+
+  // Create the page.
+  return {
+    path: pathToPage,
+    slug: parsedPath.name,
+    type: "md",
+    frontmatter,
+    contents,
+  } as LambPage
 }
 
 export async function makeJavascriptPage(
   config: LambConfig,
   pathToPage: string
-) {}
+) {
+  const parsedPath = path.parse(pathToPage)
+  const jsContents = await fs.readFile(pathToPage, "utf-8")
 
-export async function makePageNew(config: LambConfig, pathToPage: string) {
+  // Process the code, retrieving the frontmatter in the process.
+  const frontmatter: Record<string, any> = {}
+  const transformedJs = await transform(
+    config,
+    {
+      ExtractFrontmatter: frontmatter,
+      SpecialImports: {
+        loaders: LoaderMap,
+        config,
+      },
+      ConvertToDynamicImports: {},
+    },
+    jsContents,
+    pathToPage
+  )
+
+  // Obtain the compiled jsx.
+  const contents = await new AsyncFunction(transformedJs)()
+
+  // Create the page.
+  return {
+    path: pathToPage,
+    slug: parsedPath.name,
+    type: "js",
+    frontmatter,
+    contents,
+  } as LambPage
+}
+
+export async function makePage(config: LambConfig, pathToPage: string) {
   const pathinfo = path.parse(pathToPage)
 
   // Extension processors.
@@ -241,6 +319,7 @@ export async function makePageNew(config: LambConfig, pathToPage: string) {
   }
 }
 
+/*
 export async function makePage(config: LambConfig, pathToPage: string) {
   const pathinfo = path.parse(pathToPage)
 
@@ -302,3 +381,4 @@ export async function makePage(config: LambConfig, pathToPage: string) {
 
   return { path: pathToPage, slug, type, renderer } as LambPage
 }
+*/

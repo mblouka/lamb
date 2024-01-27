@@ -33,6 +33,36 @@ function valueToBabelExpr(value: any): babel.types.Expression {
   }
 }
 
+function babelExprToValue(node: babel.types.Node): any {
+  switch (node.type) {
+    case "StringLiteral":
+      return node.value
+    case "NumericLiteral":
+      return node.value
+    case "BooleanLiteral":
+      return node.value
+    case "NullLiteral":
+      return null
+    case "ArrayExpression":
+      return node.elements.map((element) =>
+        babelExprToValue(element as babel.types.Expression)
+      )
+    case "ObjectExpression":
+      const obj: Record<string, any> = {}
+      node.properties.forEach((property) => {
+        if (
+          property.type === "ObjectProperty" &&
+          property.key.type === "Identifier"
+        ) {
+          obj[property.key.name] = babelExprToValue(property.value)
+        }
+      })
+      return obj
+    default:
+      throw new Error(`Unsupported node type: ${node.type}`)
+  }
+}
+
 //===========================================================================
 // Babel plugins.
 //===========================================================================
@@ -44,10 +74,35 @@ type InhousePluginsOptionsMap = {
 
 const InhousePlugins = {
   /**
+   * Plugin for extracting the frontmatter.
+   */
+  ExtractFrontmatter(opts: Record<string, any>) {
+    return {
+      visitor: {
+        ExportNamedDeclaration(
+          path: NodePath<t.ExportNamedDeclaration>,
+          state: babel.PluginPass
+        ) {
+          const frontmatter = state.opts as typeof opts
+          const declaration = path.node.declaration!
+          if (declaration.type === "VariableDeclaration") {
+            const declarator = declaration.declarations.find(
+              (d) => d.id.type === "Identifier" && d.id.name === "frontmatter"
+            )
+            if (declarator && declarator.init?.type === "ObjectExpression") {
+              Object.assign(frontmatter, babelExprToValue(declarator.init))
+            }
+          }
+        },
+      },
+    }
+  },
+
+  /**
    * Plugin for converting ESM inline imports into dynamic imports.
    * This is necessary due to eval()'ing of the JSX modules.
    */
-  ConvertToDynamicImports() {
+  ConvertToDynamicImports(opts: {}) {
     return {
       visitor: {
         ImportDeclaration(path: NodePath<t.ImportDeclaration>) {
@@ -116,7 +171,15 @@ const InhousePlugins = {
     /**
      * Custom loaders.. Return either a string or an object.
      */
-    loaders: Record<string, (filepath: string) => string | object>
+    loaders: Record<
+      string,
+      (config: LambConfig, filepath: string) => string | object
+    >
+
+    /**
+     * Config object, used to read cache.
+     */
+    config: LambConfig
   }) {
     return {
       visitor: {
@@ -124,32 +187,34 @@ const InhousePlugins = {
           npath: NodePath<t.ImportDeclaration>,
           state: babel.PluginPass
         ) {
+          const options = state.opts as typeof opts
           const importPath = npath.node.source.value
-          const loader = opts.loaders[path.parse(importPath).ext]
+          const config = options.config
+          const loader = options.loaders[path.parse(importPath).ext]
 
-          let value
           if (loader !== undefined) {
+            let value
             if (importPath.includes("*")) {
               // Glob, values will be in an array.
               const directoryPath = path.dirname(state.file.opts.filename!)
               const files = glob
                 .sync(importPath, { cwd: directoryPath })
                 .map((subpath) => path.join(directoryPath, subpath))
-              value = files.map(loader)
+              value = files.map((file) => loader(config, file))
             } else {
               // Non-glob, import a single file.
-              value = loader(importPath)
+              value = loader(config, importPath)
             }
-          }
 
-          npath.replaceWith(
-            t.variableDeclaration("const", [
-              t.variableDeclarator(
-                t.identifier(npath.node.specifiers[0].local.name),
-                valueToBabelExpr(value)
-              ),
-            ])
-          )
+            npath.replaceWith(
+              t.variableDeclaration("const", [
+                t.variableDeclarator(
+                  t.identifier(npath.node.specifiers[0].local.name),
+                  valueToBabelExpr(value)
+                ),
+              ])
+            )
+          }
         },
       },
     }
@@ -173,6 +238,9 @@ export default async function transform(
 
   // Transform the code.
   const result = await babel.transformAsync(code, {
+    parserOpts: {
+      allowReturnOutsideFunction: true,
+    },
     presets: [
       [
         "@babel/preset-env",
