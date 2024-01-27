@@ -52,9 +52,14 @@ function babelExprToValue(node: babel.types.Node): any {
       node.properties.forEach((property) => {
         if (
           property.type === "ObjectProperty" &&
-          property.key.type === "Identifier"
+          (property.key.type === "Identifier" ||
+            property.key.type === "StringLiteral")
         ) {
-          obj[property.key.name] = babelExprToValue(property.value)
+          obj[
+            property.key.type === "Identifier"
+              ? property.key.name
+              : property.key.value
+          ] = babelExprToValue(property.value)
         }
       })
       return obj
@@ -79,12 +84,12 @@ const InhousePlugins = {
   ExtractFrontmatter(opts: Record<string, any>) {
     return {
       visitor: {
-        ExportNamedDeclaration(
-          path: NodePath<t.ExportNamedDeclaration>,
+        VariableDeclaration(
+          path: NodePath<t.VariableDeclaration>,
           state: babel.PluginPass
         ) {
           const frontmatter = state.opts as typeof opts
-          const declaration = path.node.declaration!
+          const declaration = path.node
           if (declaration.type === "VariableDeclaration") {
             const declarator = declaration.declarations.find(
               (d) => d.id.type === "Identifier" && d.id.name === "frontmatter"
