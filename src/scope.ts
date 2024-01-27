@@ -92,7 +92,8 @@ export async function makeScope(
   config: LambConfig,
   pathToScope: string,
   root?: LambScope,
-  parent?: LambScope
+  parent?: LambScope,
+  doNotParseChildren?: boolean
 ) {
   const parsed = path.parse(pathToScope)
 
